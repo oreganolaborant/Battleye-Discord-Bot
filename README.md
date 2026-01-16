@@ -57,9 +57,13 @@ sudo systemctl start gta_bot
 ---
 
 ### Commands:
+
 Command Permission     Description
+
 !bans   Everyone       Shows current stats in a compact embed (no image).
+
 !post   Admin          Manually posts the stats with a banner to the announcement channel.
+
 !update Admin          Forces a browser refresh and updates the cache immediately.
 
 ---
