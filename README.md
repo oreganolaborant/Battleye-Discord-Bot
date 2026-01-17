@@ -5,12 +5,13 @@ A professional Discord bot that tracks real-time BattlEye ban statistics for GTA
 ---
 
 ## ✨ Features
-* **Live Stats:** Tracks Today's Bans, All-Time Bans, and Average Daily Bans.
+* **Live Stats:** Tracks Today's Bans, All-Time Bans, Latest Ban and Average Daily Bans.
 * **Smart Caching:** Updates every 10 minutes to save server resources.
 * **Ban-Wave Alerts:** Automatically pings a role in an announcement channel if bans exceed 500.
 * **Dynamic UI:** Embed colors change based on risk level (Green = Clear, Red = Ban Wave).
 * **Status Presence:** Displays live ban counts in the bot's Discord activity.
 * **Admin Commands:** Manual posting and forced cache updates.
+* **Automatic Updates:** Sends a Automatic Battleye Update every 6hrs.
 
 ---
 
