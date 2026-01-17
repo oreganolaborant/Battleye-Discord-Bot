@@ -70,7 +70,12 @@ Command Permission     Description
 ---
 
 ### 📊 Status Indicators
+
 ✅ Status: 🛡️ Clear: Today's bans are below 500.
 
 🚨 Ban Wave | Be careful: Today's bans have exceeded 500.
 
+---
+### 📄 License
+
+This project is open-source and free to use.
