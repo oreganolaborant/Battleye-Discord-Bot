@@ -2,124 +2,133 @@ import discord
 from discord.ext import commands, tasks
 import asyncio
 from playwright.async_api import async_playwright
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 
-# --- CONFIG (REPLACE THESE) ---
-TOKEN = 'YOUR_BOT_TOKEN_HERE' # replace with your bot token
-ANNOUNCEMENT_CHANNEL_ID = 123456789012345678 # replace with channel id where everything gets posted
-ROLE_ID = 123456789012345678 # replace with your role that should be tagged when a ban wave happens
-BANNER_URL = "[https://ibb.co/RkqCyKzy](https://ibb.co/RkqCyKzy)" # replace with your banner
+# --- CONFIG ---
+TOKEN = 'YOUR_BOT_TOKEN_HERE'
+ANNOUNCEMENT_CHANNEL_ID = 1461020418868641936 # Your CHannel ID here
+ROLE_ID = 1461451753898901566 # Your Role ID here
+BANNER_URL = "https://cdn.discordapp.com/attachments/1456753267114639492/1461803697464938579/526ca95b-0815-4b14-a751-908240332f2d.png" # Your Banner URL here
 
 intents = discord.Intents.default()
 intents.message_content = True 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# GLOBAL CACHE
-stats_cache = {"today": "0", "total": "0", "avg": "0", "last_updated": None}
+# --- GLOBAL CACHE ---
+stats_cache = {"today": "0", "total": "0", "avg": "0", "last_ban_time": "Unknown", "last_updated": None}
 alert_sent = False
-last_scheduled_hour = -1
+
+# Scheduled Update Times: 1 AM, 7 AM, 1 PM, 7 PM
+scheduled_times = [
+    time(hour=1, minute=0),
+    time(hour=7, minute=0),
+    time(hour=13, minute=0),
+    time(hour=19, minute=0)
+]
 
 async def get_stats(force_update=False):
     global stats_cache
     now = datetime.now()
     if not force_update and stats_cache["last_updated"] and now < stats_cache["last_updated"] + timedelta(minutes=10):
         return stats_cache
-
     try:
         async with async_playwright() as p:
             browser = await p.firefox.launch(headless=True)
             page = await browser.new_page()
-            await page.goto("[https://battleye.dudx.info/](https://battleye.dudx.info/)", wait_until="networkidle", timeout=60000)
-            await asyncio.sleep(6) 
+            await page.goto("https://battleye.dudx.info/", wait_until="networkidle", timeout=60000)
+            await asyncio.sleep(8) 
             res_today = await page.query_selector("#todayBans")
             res_total = await page.query_selector("#totalBans")
             res_avg = await page.query_selector("#avgBans")
+            res_last_time = await page.query_selector(".ban-item .text-text-secondary")
             if res_today and res_total and res_avg:
-                stats_cache["today"] = (await res_today.inner_text()).strip()
-                stats_cache["total"] = (await res_total.inner_text()).strip()
-                stats_cache["avg"] = (await res_avg.inner_text()).strip()
-                stats_cache["last_updated"] = now
-                await bot.change_presence(activity=discord.Game(name=f"🛡️ {stats_cache['today']} Bans Today"))
+                stats_cache.update({
+                    "today": (await res_today.inner_text()).strip(),
+                    "total": (await res_total.inner_text()).strip(),
+                    "avg": (await res_avg.inner_text()).strip(),
+                    "last_ban_time": (await res_last_time.inner_text()).strip() if res_last_time else "Unknown",
+                    "last_updated": now
+                })
             await browser.close()
     except Exception as e:
-        print(f"Error during fetch: {e}")
+        print(f"Error: {e}")
     return stats_cache
 
 def create_pretty_embed(data, show_image=False):
     current_time = datetime.now().strftime("%I:%M %p CET")
-    try:
-        clean_val = int(data["today"].replace(",", "").replace(".", ""))
-    except:
-        clean_val = 0
+    clean_val = int(data["today"].replace(",", "")) if data["today"].replace(",", "").isdigit() else 0
+    color = discord.Color.red() if clean_val >= 500 else discord.Color.green()
+    status = "🚨 Ban Wave detected | Use caution" if clean_val >= 500 else "✅ Status: 🛡️ Clear"
 
-    if clean_val >= 500:
-        status_title, embed_color = "🚨 Ban Wave | Be careful", discord.Color.red()
-    else:
-        status_title, embed_color = "✅ Status: 🛡️ Clear", discord.Color.green()
-
-    embed = discord.Embed(title="🛡️ BattlEye Anti-Cheat Statistics", description=f"**{status_title}**", color=embed_color)
-    if show_image: 
-        embed.set_image(url=BANNER_URL)
+    embed = discord.Embed(title="🛡️ BattlEye Anti-Cheat Statistics", description=f"**{status}**", color=color)
     
-    embed.add_field(name="Current Bans (Today)", value=f"**{data['today']}**", inline=False)
-    embed.add_field(name="All Time Bans", value=f"**{data['total']}**", inline=True)
+    # Row 1: Today & Latest
+    embed.add_field(name="Today's Bans", value=f"**{data['today']}**", inline=True)
+    embed.add_field(name="Latest Ban", value=f"**{data['last_ban_time']}**", inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+    # Row 2: Total & Avg
+    embed.add_field(name="All-Time Bans", value=f"**{data['total']}**", inline=True)
     embed.add_field(name="Average Daily", value=f"**{data['avg']}**", inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+    if show_image:
+        embed.set_image(url=BANNER_URL)
+
     embed.set_footer(text=f"Source: BattlEye Masterlist • 🔴 Live Data Feed • {current_time}")
     return embed
 
-@tasks.loop(minutes=5)
-async def scheduled_task():
-    global alert_sent, last_scheduled_hour
-    data = await get_stats()
-    now = datetime.now()
-    
-    try:
-        clean_val = int(data["today"].replace(",", "").replace(".", ""))
-        channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
-        
-        if channel:
-            # 1. SCHEDULE: 00:00 and 12:00
-            if now.hour in [0, 12] and now.hour != last_scheduled_hour:
-                await channel.send(embed=create_pretty_embed(data, show_image=True))
-                last_scheduled_hour = now.hour
-            elif now.hour not in [0, 12]:
-                last_scheduled_hour = -1
+# --- LOOPS ---
 
-            # 2. EMERGENCY ALERT: Ban Wave (> 500)
-            if clean_val >= 500 and not alert_sent:
-                await channel.send(content=f"<@&{ROLE_ID}>", embed=create_pretty_embed(data, show_image=True))
+@tasks.loop(time=scheduled_times)
+async def fixed_schedule_task():
+    channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
+    if channel:
+        data = await get_stats(force_update=True)
+        embed = create_pretty_embed(data, show_image=True)
+        await channel.send(content="📊 **Scheduled Statistics Update**", embed=embed)
+
+@tasks.loop(minutes=10)
+async def scheduled_task():
+    global alert_sent
+    data = await get_stats()
+    try:
+        val = int(data["today"].replace(",", ""))
+        if val >= 500 and not alert_sent:
+            channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
+            if channel:
+                embed = create_pretty_embed(data, show_image=True)
+                await channel.send(content=f"⚠️ **Attention** <@&{ROLE_ID}>", embed=embed)
                 alert_sent = True
-            elif clean_val < 500:
-                alert_sent = False
-    except Exception as e:
-        print(f"Loop Error: {e}")
+        elif val < 500:
+            alert_sent = False
+    except:
+        pass
+
+# --- COMMANDS ---
 
 @bot.event
 async def on_ready():
-    print(f"Bot is online as {bot.user}")
-    await get_stats(force_update=True)
-    if not scheduled_task.is_running():
-        scheduled_task.start()
+    print(f"Logged in as {bot.user}"); await get_stats(force_update=True)
+    if not scheduled_task.is_running(): scheduled_task.start()
+    if not fixed_schedule_task.is_running(): fixed_schedule_task.start()
 
 @bot.command()
 async def bans(ctx):
+    """Shows current ban statistics"""
     data = await get_stats()
-    await ctx.send(embed=create_pretty_embed(data, show_image=False))
+    embed = create_pretty_embed(data, show_image=False)
+    await ctx.send(embed=embed)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def post(ctx):
-    data = await get_stats()
+    """Manually post statistics with image"""
+    data = await get_stats(force_update=True)
     channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
     if channel:
-        await channel.send(embed=create_pretty_embed(data, show_image=True))
-        await ctx.send("✅ Manual announcement sent.")
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def update(ctx):
-    msg = await ctx.send("⏳ *Forcing cache update via browser...*")
-    data = await get_stats(force_update=True)
-    await msg.edit(content=f"✅ **Cache updated!** Current bans: `{data['today']}`")
+        embed = create_pretty_embed(data, show_image=True)
+        await channel.send(embed=embed)
+        await ctx.send("✅ Statistics posted successfully.")
 
 bot.run(TOKEN)
